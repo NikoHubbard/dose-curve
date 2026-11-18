@@ -321,6 +321,7 @@ button { cursor: pointer; touch-action: manipulation; }
     Estimate from average adult numbers on the FDA label for Adderall tablets: peak about 3 hours after a dose,
     half-life about 10 hours (d-amphetamine) and 12.6 hours (l-amphetamine), mixed 3:1. Doses add together.
     Your levels will differ, and this shows blood level, not how it feels. It's a planning aid, not dosing advice.
+    Your doses and times are saved on this phone only.
   </p>
 </main>
 
@@ -350,8 +351,9 @@ button { cursor: pointer; touch-action: manipulation; }
   const DAY = 1440, STEP = 5;
   const COLORS = ['--d1', '--d2', '--d3', '--d4', '--d5', '--d6'];
   const SIZES = [2.5, 5, 10];
+  const $ = s => document.querySelector(s);
 
-  /* ---------- State (memory only, resets on reload) ---------- */
+  /* ---------- State (saved on this device after every change) ---------- */
   const state = {
     wake: 7 * 60,
     bed: 23 * 60,
@@ -366,10 +368,41 @@ button { cursor: pointer; touch-action: manipulation; }
     state.colorIdx++;
     return d;
   }
-  state.doses.push(newDose(8 * 60, [5]), newDose(12 * 60, [5]));
+
+  const SAVE_KEY = 'dose-curve-state-v1';
+  const validMin = m => Number.isFinite(m) && m >= 0 && m < 1440;
+
+  function save() {
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify({
+        wake: state.wake,
+        bed: state.bed,
+        example: state.example,
+        doses: state.doses.map(d => ({ time: d.time, parts: d.parts })),
+      }));
+    } catch (e) { /* storage unavailable: keep working without it */ }
+  }
+
+  function load() {
+    try {
+      const o = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+      if (!o || !Array.isArray(o.doses)) return false;
+      if (validMin(o.wake)) state.wake = o.wake;
+      if (validMin(o.bed)) state.bed = o.bed;
+      state.example = o.example === true;
+      o.doses.forEach(d => {
+        if (!d || !validMin(d.time) || !Array.isArray(d.parts)) return;
+        state.doses.push(newDose(d.time, d.parts.filter(p => SIZES.includes(p))));
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  if (!load()) state.doses.push(newDose(8 * 60, [5]), newDose(12 * 60, [5]));
 
   /* ---------- Helpers ---------- */
-  const $ = s => document.querySelector(s);
   const mgOf = d => d.parts.reduce((a, b) => a + b, 0);
   const fmtMg = n => (Number.isInteger(n) ? String(n) : n.toFixed(1));
   const toMin = v => {
@@ -654,6 +687,7 @@ button { cursor: pointer; touch-action: manipulation; }
     const s = series();
     renderChart(s);
     renderTiles(s);
+    save();
   }
   function edited() {
     if (state.example) { state.example = false; $('#examplePill').hidden = true; }
@@ -720,6 +754,8 @@ button { cursor: pointer; touch-action: manipulation; }
   });
 
   /* ---------- Boot ---------- */
+  $('#wake').value = toInput(state.wake);
+  $('#bed').value = toInput(state.bed);
   renderDoses();
   refresh();
   let resizeTimer = null;
