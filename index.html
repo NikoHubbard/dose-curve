@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dose Curve</title>
+<meta name="description" content="Plan Adderall IR dose timing with an estimated blood-level curve.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Dose Curve">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f1f2f4">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0c0e11">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+/* Layout: one column for a 390pt phone. Summary tiles, then the 24 h chart, then dose cards, then wake/bed times. */
+:root {
+  --bg: #f1f2f4;
+  --surface: #ffffff;
+  --ink: #14171c;
+  --muted: #646b75;
+  --line: #dfe2e6;
+  --accent: #d4561a;
+  --night: rgba(64, 86, 140, 0.10);
+  --d1: #0e8f80;
+  --d2: #3a68d0;
+  --d3: #b8407f;
+  --d4: #7a52c7;
+  --d5: #7f8a12;
+  --d6: #56677d;
+  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  --font-num: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0c0e11;
+    --surface: #171a1f;
+    --ink: #eef0f3;
+    --muted: #979ea8;
+    --line: #2b3038;
+    --accent: #ff8644;
+    --night: rgba(130, 150, 225, 0.13);
+    --d1: #2fc6b0;
+    --d2: #7199ff;
+    --d3: #f06dae;
+    --d4: #ab8cff;
+    --d5: #c9cc4a;
+    --d6: #9aa9bd;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0c0e11;
+  --surface: #171a1f;
+  --ink: #eef0f3;
+  --muted: #979ea8;
+  --line: #2b3038;
+  --accent: #ff8644;
+  --night: rgba(130, 150, 225, 0.13);
+  --d1: #2fc6b0;
+  --d2: #7199ff;
+  --d3: #f06dae;
+  --d4: #ab8cff;
+  --d5: #c9cc4a;
+  --d6: #9aa9bd;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; touch-action: manipulation; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.app {
+  max-width: 520px;
+  margin: 0 auto;
+  padding:
+    calc(env(safe-area-inset-top) + 14px)
+    calc(env(safe-area-inset-right) + 16px)
+    calc(env(safe-area-inset-bottom) + 28px)
+    calc(env(safe-area-inset-left) + 16px);
+  display: grid;
+  gap: 14px;
+}
+
+.top h1 {
+  margin: 0;
+  font-family: var(--font-num);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.top .sub { margin: 2px 0 0; font-size: 14px; color: var(--muted); }
+
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.tile {
+  background: var(--surface);
+  border-radius: 14px;
+  padding: 10px 12px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.tile .label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.tile .num {
+  font-family: var(--font-num);
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+.tile .num small { font-size: 15px; font-weight: 600; color: var(--muted); margin-left: 1px; }
+.tile .meta { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.card { background: var(--surface); border-radius: 16px; padding: 12px; }
+
+.chart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 18px;
+}
+.readout {
+  font-family: var(--font-num);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.chart { height: 236px; margin-top: 6px; }
+.chart svg { display: block; width: 100%; height: 100%; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 11.5px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { display: inline-block; width: 16px; height: 0; border-top: 3px solid var(--ink); }
+.legend i.each { border-top: 2px solid var(--d2); }
+.legend i.now { border-top: 2px solid var(--accent); }
+.legend i.bed { width: 14px; height: 10px; border: 0; background: var(--night); border-left: 2px dashed var(--muted); }
+
+.section-head { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.section-head h2 { margin: 0; font-size: 18px; font-weight: 650; }
+.pill {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.pill[hidden] { display: none; }
+.link {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 600;
+  min-height: 44px;
+  padding: 0 4px;
+}
+
+.doses { display: grid; gap: 10px; }
+.dose {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 10px 12px 12px 14px;
+  border-left: 5px solid var(--c);
+}
+.dose-top { display: flex; align-items: center; gap: 8px; }
+.dose-name { font-size: 15px; font-weight: 600; }
+.dose-time, .times input {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--bg);
+  border: 0;
+  border-radius: 10px;
+  padding: 6px 10px;
+  min-height: 38px;
+  font-family: var(--font-num);
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.dose-time { margin-left: auto; }
+.remove {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 24px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+}
+.dose-amt { display: flex; align-items: baseline; gap: 5px; margin: 6px 0 10px; }
+.dose-amt .mg { font-family: var(--font-num); font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.dose-amt .unit { font-size: 15px; color: var(--muted); font-weight: 600; }
+.dose-amt .parts { margin-left: auto; font-size: 13px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+
+.chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.chips button {
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  background: color-mix(in srgb, var(--c) 13%, var(--surface));
+  border-color: color-mix(in srgb, var(--c) 30%, transparent);
+  font-family: var(--font-num);
+  font-size: 17px;
+  font-weight: 700;
+  transition: transform 80ms ease;
+}
+.chips button:active { transform: scale(0.95); }
+.chips .undo {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 600;
+}
+.chips .undo:disabled { opacity: 0.4; }
+
+.add {
+  width: 100%;
+  min-height: 50px;
+  margin-top: 10px;
+  border-radius: 14px;
+  border: 1.5px dashed var(--muted);
+  background: transparent;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.times { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.times label { display: grid; gap: 4px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.times input { width: 100%; }
+
+.note { margin: 2px 2px 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); max-width: 65ch; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+<main class="app">
+  <header class="top">
+    <h1>Dose Curve</h1>
+    <p class="sub">Adderall IR · estimated blood level over 24 hours</p>
+  </header>
+
+  <section class="tiles" aria-label="Summary">
+    <div class="tile"><span class="label">Now</span><span class="num" id="statNow">–</span><span class="meta" id="statNowMeta">&nbsp;</span></div>
+    <div class="tile"><span class="label">Peak</span><span class="num" id="statPeak">–</span><span class="meta" id="statPeakMeta">&nbsp;</span></div>
+    <div class="tile"><span class="label">At bedtime</span><span class="num" id="statBed">–</span><span class="meta" id="statBedMeta">&nbsp;</span></div>
+  </section>
+
+  <section class="card" aria-label="Chart">
+    <div class="chart-head">
+      <span>Level, % of one 10 mg peak</span>
+      <span class="readout" id="readout" aria-live="polite"></span>
+    </div>
+    <div class="chart" id="chart"></div>
+    <div class="legend" aria-hidden="true">
+      <span><i></i>Total</span>
+      <span><i class="each"></i>Each dose</span>
+      <span><i class="now"></i>Now</span>
+      <span><i class="bed"></i>Sleep</span>
+    </div>
+  </section>
+
+  <section aria-label="Doses">
+    <div class="section-head">
+      <h2>Doses</h2>
+      <span class="pill" id="examplePill">Example</span>
+      <button type="button" class="link" id="clearAll">Clear all</button>
+    </div>
+    <div class="doses" id="doses"></div>
+    <button type="button" class="add" id="addDose">+ Add dose</button>
+  </section>
+
+  <section class="card times" aria-label="Day">
+    <label for="wake">Wake up<input type="time" id="wake" value="07:00"></label>
+    <label for="bed">Bedtime<input type="time" id="bed" value="23:00"></label>
+  </section>
+
+  <p class="note">
+    Estimate from average adult numbers on the FDA label for Adderall tablets: peak about 3 hours after a dose,
+    half-life about 10 hours (d-amphetamine) and 12.6 hours (l-amphetamine), mixed 3:1. Doses add together.
+    Your levels will differ, and this shows blood level, not how it feels. It's a planning aid, not dosing advice.
+  </p>
+</main>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ---------- Model ----------
+     One-compartment, first-order absorption (Bateman curve), summed per dose.
+     d- and l-amphetamine modeled separately, 3:1, as in Adderall tablets. */
+  const KE_D = Math.LN2 / 10.4;   // d-amphetamine half-life, label: 9.77–11 h
+  const KE_L = Math.LN2 / 12.65;  // l-amphetamine half-life, label: 11.5–13.8 h
+  const KA = 0.9724;              // absorption rate (1/h), puts the peak at 3.0 h
+  const FRAC_D = 0.75, FRAC_L = 0.25;
+
+  const bateman = (h, ke) => KA / (KA - ke) * (Math.exp(-ke * h) - Math.exp(-KA * h));
+  const shape = h => (h <= 0 ? 0 : FRAC_D * bateman(h, KE_D) + FRAC_L * bateman(h, KE_L));
+
+  let PEAK1 = 0;
+  for (let h = 0; h <= 12; h += 0.01) PEAK1 = Math.max(PEAK1, shape(h));
+  const PCT_PER_MG = 100 / (10 * PEAK1); // 100 = peak of a single 10 mg dose
+
+  const DAY = 1440, STEP = 5;
+  const COLORS = ['--d1', '--d2', '--d3', '--d4', '--d5', '--d6'];
+  const SIZES = [2.5, 5, 10];
+
+  /* ---------- State (memory only, resets on reload) ---------- */
+  const state = {
+    wake: 7 * 60,
+    bed: 23 * 60,
+    doses: [],
+    example: true,
+    nextId: 1,
+    colorIdx: 0,
+  };
+
+  function newDose(time, parts) {
+    const d = { id: state.nextId++, time, parts: parts || [], color: COLORS[state.colorIdx % COLORS.length] };
+    state.colorIdx++;
+    return d;
+  }
+  state.doses.push(newDose(8 * 60, [5]), newDose(12 * 60, [5]));
+
+  /* ---------- Helpers ---------- */
+  const $ = s => document.querySelector(s);
+  const mgOf = d => d.parts.reduce((a, b) => a + b, 0);
+  const fmtMg = n => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+  const toMin = v => {
+    if (!v || !/^\d{1,2}:\d{2}/.test(v)) return null;
+    const [h, m] = v.split(':').map(Number);
+    return h * 60 + m;
+  };
+  const toInput = m => {
+    m = ((m % DAY) + DAY) % DAY;
+    return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+  };
+  const fmtClock = m => {
+    m = ((Math.round(m) % DAY) + DAY) % DAY;
+    const h = Math.floor(m / 60), mm = m % 60;
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return h12 + ':' + String(mm).padStart(2, '0') + (h < 12 ? ' AM' : ' PM');
+  };
+  const fmtTick = m => {
+    const h = Math.floor((((m % DAY) + DAY) % DAY) / 60);
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return h12 + (h < 12 ? 'a' : 'p');
+  };
+  const windowStart = () => Math.floor(state.wake / 60) * 60;
+  const posOf = clockMin => (((clockMin - windowStart()) % DAY) + DAY) % DAY;
+  const nowClock = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60; };
+
+  function partsLabel(parts) {
+    if (!parts.length) return 'Tap a size to add';
+    if (parts.length === 1) return '';
+    const counts = {};
+    parts.forEach(p => { counts[p] = (counts[p] || 0) + 1; });
+    return Object.keys(counts).map(Number).sort((a, b) => b - a)
+      .map(s => (counts[s] > 1 ? counts[s] + '×' : '') + fmtMg(s)).join(' + ');
+  }
+
+  function levelAt(pos) {
+    let v = 0;
+    for (const d of state.doses) {
+      const mg = mgOf(d);
+      if (mg) v += mg * shape((pos - posOf(d.time)) / 60);
+    }
+    return v * PCT_PER_MG;
+  }
+
+  function series() {
+    const n = DAY / STEP;
+    const total = new Array(n + 1).fill(0);
+    const each = state.doses.map(d => {
+      const mg = mgOf(d), p = posOf(d.time), arr = new Array(n + 1);
+      for (let i = 0; i <= n; i++) {
+        const v = mg ? mg * shape((i * STEP - p) / 60) * PCT_PER_MG : 0;
+        arr[i] = v;
+        total[i] += v;
+      }
+      return { dose: d, values: arr, mg };
+    });
+    return { total, each };
+  }
+
+  /* ---------- Chart ---------- */
+  let geom = null;
+
+  function renderChart(s) {
+    const el = $('#chart');
+    const W = Math.max(280, Math.round(el.clientWidth || 340));
+    const H = Math.round(el.clientHeight || 236);
+    const pad = { l: 34, r: 12, t: 16, b: 24 };
+    const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+
+    const maxT = Math.max(0, ...s.total);
+    const step = maxT * 1.08 <= 150 ? 25 : maxT * 1.08 <= 300 ? 50 : maxT * 1.08 <= 600 ? 100 : 200;
+    const yMax = Math.max(125, Math.ceil((maxT * 1.08) / step) * step);
+    const x = m => pad.l + (m / DAY) * iw;
+    const y = v => pad.t + ih - (v / yMax) * ih;
+    geom = { W, H, pad, iw, ih, x, y, yMax };
+
+    const path = vals => vals.map((v, i) => (i ? 'L' : 'M') + x(i * STEP).toFixed(1) + ' ' + y(v).toFixed(1)).join('');
+    let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" id="svg">`;
+    svg += `<defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" style="stop-color:var(--accent);stop-opacity:.30"/>
+      <stop offset="1" style="stop-color:var(--accent);stop-opacity:0"/></linearGradient></defs>`;
+
+    // Sleep band: bedtime to wake
+    const bedPos = posOf(state.bed), wakePos = posOf(state.wake);
+    const band = (a, b) => (b > a ? `<rect x="${x(a).toFixed(1)}" y="${pad.t}" width="${(x(b) - x(a)).toFixed(1)}" height="${ih}" style="fill:var(--night)"/>` : '');
+    if (bedPos > wakePos) svg += band(bedPos, DAY) + band(0, wakePos);
+    else svg += band(bedPos, wakePos);
+
+    // Y grid
+    for (let v = 0; v <= yMax; v += step) {
+      svg += `<line x1="${pad.l}" x2="${W - pad.r}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" style="stroke:var(--line);stroke-width:1"/>`;
+      svg += `<text x="${pad.l - 6}" y="${(y(v) + 3.5).toFixed(1)}" text-anchor="end" style="fill:var(--muted);font-size:10px;font-family:var(--font-num)">${v}</text>`;
+    }
+    // X ticks every 3 h
+    const start = windowStart();
+    for (let m = 0; m <= DAY; m += 180) {
+      const anchor = m === 0 ? 'start' : m === DAY ? 'end' : 'middle';
+      svg += `<line x1="${x(m).toFixed(1)}" x2="${x(m).toFixed(1)}" y1="${pad.t + ih}" y2="${pad.t + ih + 4}" style="stroke:var(--muted);stroke-width:1"/>`;
+      svg += `<text x="${x(m).toFixed(1)}" y="${H - 6}" text-anchor="${anchor}" style="fill:var(--muted);font-size:10.5px;font-family:var(--font-num)">${fmtTick(start + m)}</text>`;
+    }
+
+    const hasAny = maxT > 0.05;
+    if (hasAny) {
+      // Area + per-dose lines + total
+      svg += `<path d="${path(s.total)}L${x(DAY).toFixed(1)} ${y(0).toFixed(1)}L${x(0).toFixed(1)} ${y(0).toFixed(1)}Z" style="fill:url(#fill)"/>`;
+      if (s.each.filter(e => e.mg).length > 1) {
+        s.each.forEach(e => {
+          if (!e.mg) return;
+          // Start each dose's line at its own dose time
+          const p = posOf(e.dose.time), i0 = Math.ceil(p / STEP);
+          let d = 'M' + x(p).toFixed(1) + ' ' + y(0).toFixed(1);
+          for (let i = i0; i < e.values.length; i++) d += 'L' + x(i * STEP).toFixed(1) + ' ' + y(e.values[i]).toFixed(1);
+          if (e.mg) svg += `<path d="${d}" style="fill:none;stroke:var(${e.dose.color});stroke-width:1.75;stroke-linejoin:round;opacity:.9"/>`;
+        });
+      }
+      svg += `<path d="${path(s.total)}" style="fill:none;stroke:var(--ink);stroke-width:3;stroke-linejoin:round;stroke-linecap:round"/>`;
+    } else {
+      svg += `<text x="${pad.l + iw / 2}" y="${pad.t + ih / 2}" text-anchor="middle" style="fill:var(--muted);font-size:13px">Tap +2.5, +5 or +10 to add a dose</text>`;
+    }
+
+    // Dose markers on the baseline
+    s.each.forEach(e => {
+      if (!e.mg) return;
+      const px = x(posOf(e.dose.time)).toFixed(1);
+      svg += `<circle cx="${px}" cy="${y(0).toFixed(1)}" r="4.5" style="fill:var(${e.dose.color});stroke:var(--surface);stroke-width:2"/>`;
+    });
+
+    // Bedtime line (label goes on whichever side keeps it clear of the Now line and the chart edge)
+    const bx = x(bedPos).toFixed(1);
+    const nx = x(posOf(nowClock())).toFixed(1);
+    svg += `<line x1="${bx}" x2="${bx}" y1="${pad.t}" y2="${pad.t + ih}" style="stroke:var(--muted);stroke-width:1.25;stroke-dasharray:3 3"/>`;
+    let bedLeft = bedPos > DAY - 150;
+    if (Math.abs(+nx - +bx) < 34) bedLeft = +nx > +bx;
+    if (+bx - pad.l < 30) bedLeft = false;
+    svg += `<text x="${(+bx + (bedLeft ? -4 : 4)).toFixed(1)}" y="${pad.t + 11}" text-anchor="${bedLeft ? 'end' : 'start'}" style="fill:var(--muted);font-size:10.5px;font-weight:600">Bed</text>`;
+
+    // Now line
+    const nowAnchor = +nx < pad.l + 14 ? 'start' : +nx > W - pad.r - 14 ? 'end' : 'middle';
+    svg += `<line x1="${nx}" x2="${nx}" y1="${pad.t - 2}" y2="${pad.t + ih}" style="stroke:var(--accent);stroke-width:1.75"/>`;
+    svg += `<text x="${nx}" y="${pad.t - 5}" text-anchor="${nowAnchor}" style="fill:var(--accent);font-size:10.5px;font-weight:700">Now</text>`;
+
+    // Scrub layer
+    svg += `<g id="scrub" style="display:none">
+      <line id="scrubLine" y1="${pad.t}" y2="${pad.t + ih}" style="stroke:var(--ink);stroke-width:1;opacity:.5"/>
+      <circle id="scrubDot" r="5" style="fill:var(--accent);stroke:var(--surface);stroke-width:2"/></g>`;
+    svg += `<rect x="0" y="0" width="${W}" height="${H}" fill="transparent" id="hit"/>`;
+    svg += '</svg>';
+    el.innerHTML = svg;
+    el.setAttribute('role', 'img');
+    const pk = peakOf(s.total);
+    el.setAttribute('aria-label', hasAny
+      ? `Estimated level over 24 hours. Peak ${Math.round(pk.v)} percent at ${fmtClock(windowStart() + pk.m)}.`
+      : 'Empty chart. Add a dose to see the curve.');
+    bindScrub();
+  }
+
+  /* ---------- Scrubbing ---------- */
+  let hideTimer = null;
+  function bindScrub() {
+    const svg = $('#svg');
+    const show = ev => {
+      if (!geom) return;
+      const r = svg.getBoundingClientRect();
+      const px = (ev.clientX - r.left) * (geom.W / r.width);
+      let m = ((px - geom.pad.l) / geom.iw) * DAY;
+      m = Math.max(0, Math.min(DAY, Math.round(m / STEP) * STEP));
+      const v = levelAt(m);
+      const g = $('#scrub');
+      g.style.display = '';
+      const sx = geom.x(m).toFixed(1);
+      $('#scrubLine').setAttribute('x1', sx);
+      $('#scrubLine').setAttribute('x2', sx);
+      $('#scrubDot').setAttribute('cx', sx);
+      $('#scrubDot').setAttribute('cy', geom.y(v).toFixed(1));
+      $('#readout').textContent = fmtClock(windowStart() + m) + ' · ' + Math.round(v) + '%';
+      clearTimeout(hideTimer);
+    };
+    const hide = () => {
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => {
+        const g = $('#scrub');
+        if (g) g.style.display = 'none';
+        $('#readout').textContent = '';
+      }, 1800);
+    };
+    svg.addEventListener('pointerdown', ev => { show(ev); });
+    svg.addEventListener('pointermove', show);
+    svg.addEventListener('pointerup', hide);
+    svg.addEventListener('pointercancel', hide);
+    svg.addEventListener('pointerleave', hide);
+  }
+
+  /* ---------- Summary tiles ---------- */
+  function peakOf(total) {
+    let v = -1, m = 0;
+    total.forEach((t, i) => { if (t > v) { v = t; m = i * STEP; } });
+    return { v, m };
+  }
+  function pct(el, v) { el.innerHTML = Math.round(v) + '<small>%</small>'; }
+
+  function renderTiles(s) {
+    const any = s.total.some(t => t > 0.05);
+    const nowPos = posOf(nowClock());
+    const bedPos = posOf(state.bed);
+    if (!any) {
+      ['#statNow', '#statPeak', '#statBed'].forEach(id => { $(id).textContent = '–'; });
+      ['#statNowMeta', '#statPeakMeta'].forEach(id => { $(id).innerHTML = '&nbsp;'; });
+      $('#statBedMeta').textContent = fmtClock(state.bed);
+      return;
+    }
+    const vn = levelAt(nowPos);
+    const slope = levelAt(Math.min(DAY, nowPos + 10)) - vn;
+    pct($('#statNow'), vn);
+    $('#statNowMeta').textContent = vn < 0.5 ? fmtClock(nowClock()) : slope > 0.15 ? 'rising' : slope < -0.15 ? 'falling' : 'steady';
+    const pk = peakOf(s.total);
+    pct($('#statPeak'), pk.v);
+    $('#statPeakMeta').textContent = fmtClock(windowStart() + pk.m);
+    pct($('#statBed'), levelAt(bedPos));
+    $('#statBedMeta').textContent = fmtClock(state.bed);
+  }
+
+  /* ---------- Dose cards ---------- */
+  function renderDoses() {
+    const box = $('#doses');
+    box.innerHTML = state.doses.map((d, i) => {
+      const n = i + 1, mg = mgOf(d);
+      return `<article class="dose" data-id="${d.id}" style="--c: var(${d.color})">
+        <div class="dose-top">
+          <span class="dose-name">Dose ${n}</span>
+          <input type="time" class="dose-time" id="time-${d.id}" value="${toInput(d.time)}" aria-label="Dose ${n} time">
+          <button type="button" class="remove" data-act="remove" aria-label="Remove dose ${n}">×</button>
+        </div>
+        <div class="dose-amt">
+          <span class="mg">${fmtMg(mg)}</span><span class="unit">mg</span>
+          <span class="parts">${partsLabel(d.parts)}</span>
+        </div>
+        <div class="chips">
+          ${SIZES.map(sz => `<button type="button" data-act="add" data-size="${sz}" aria-label="Add ${sz} mg to dose ${n}">+${fmtMg(sz)}</button>`).join('')}
+          <button type="button" class="undo" data-act="undo" ${d.parts.length ? '' : 'disabled'} aria-label="Undo last add on dose ${n}">Undo</button>
+        </div>
+      </article>`;
+    }).join('');
+    $('#clearAll').hidden = state.doses.length === 0;
+    $('#examplePill').hidden = !state.example;
+  }
+
+  function refresh() {
+    const s = series();
+    renderChart(s);
+    renderTiles(s);
+  }
+  function edited() {
+    if (state.example) { state.example = false; $('#examplePill').hidden = true; }
+  }
+
+  $('#doses').addEventListener('click', ev => {
+    const btn = ev.target.closest('button[data-act]');
+    if (!btn) return;
+    const card = btn.closest('.dose');
+    const d = state.doses.find(x => x.id === +card.dataset.id);
+    if (!d) return;
+    edited();
+    const act = btn.dataset.act;
+    if (act === 'add') d.parts.push(+btn.dataset.size);
+    else if (act === 'undo') d.parts.pop();
+    else if (act === 'remove') state.doses = state.doses.filter(x => x !== d);
+
+    if (act === 'remove') { renderDoses(); refresh(); return; }
+    // Update this card in place so the button keeps focus
+    const mg = mgOf(d);
+    card.querySelector('.mg').textContent = fmtMg(mg);
+    card.querySelector('.parts').textContent = partsLabel(d.parts);
+    card.querySelector('.undo').disabled = d.parts.length === 0;
+    refresh();
+  });
+
+  $('#doses').addEventListener('input', ev => {
+    if (!ev.target.classList.contains('dose-time')) return;
+    const card = ev.target.closest('.dose');
+    const d = state.doses.find(x => x.id === +card.dataset.id);
+    const m = toMin(ev.target.value);
+    if (!d || m === null) return;
+    edited();
+    d.time = m;
+    refresh();
+  });
+
+  $('#addDose').addEventListener('click', () => {
+    edited();
+    const last = state.doses[state.doses.length - 1];
+    const t = last ? (last.time + 240) % DAY : Math.round(nowClock() / 15) * 15 % DAY;
+    state.doses.push(newDose(t, []));
+    renderDoses();
+    refresh();
+    const card = $('#doses').lastElementChild;
+    if (card) card.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+  });
+
+  $('#clearAll').addEventListener('click', () => {
+    edited();
+    state.doses = [];
+    state.colorIdx = 0;
+    renderDoses();
+    refresh();
+  });
+
+  [['#wake', 'wake'], ['#bed', 'bed']].forEach(([sel, key]) => {
+    $(sel).addEventListener('input', ev => {
+      const m = toMin(ev.target.value);
+      if (m === null) return;
+      state[key] = m;
+      refresh();
+    });
+  });
+
+  /* ---------- Boot ---------- */
+  renderDoses();
+  refresh();
+  let resizeTimer = null;
+  addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(refresh, 120); });
+  setInterval(refresh, 60 * 1000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+
+  // Offline support when installed (ignored where service workers aren't allowed)
+  try {
+    if ('serviceWorker' in navigator && location.protocol === 'https:') {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+  } catch (e) { /* not available here */ }
+})();
+</script>
+</body>
+</html>
