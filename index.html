@@ -24,6 +24,8 @@
   --line: #dfe2e6;
   --accent: #d4561a;
   --night: rgba(64, 86, 140, 0.10);
+  --fade: rgba(234, 179, 8, 0.17);
+  --drop: rgba(220, 38, 38, 0.11);
   --d1: #0e8f80;
   --d2: #3a68d0;
   --d3: #b8407f;
@@ -43,6 +45,8 @@
     --line: #2b3038;
     --accent: #ff8644;
     --night: rgba(130, 150, 225, 0.13);
+    --fade: rgba(250, 204, 21, 0.16);
+    --drop: rgba(248, 113, 113, 0.14);
     --d1: #2fc6b0;
     --d2: #7199ff;
     --d3: #f06dae;
@@ -60,6 +64,8 @@
   --line: #2b3038;
   --accent: #ff8644;
   --night: rgba(130, 150, 225, 0.13);
+  --fade: rgba(250, 204, 21, 0.16);
+  --drop: rgba(248, 113, 113, 0.14);
   --d1: #2fc6b0;
   --d2: #7199ff;
   --d3: #f06dae;
@@ -137,6 +143,8 @@ button { cursor: pointer; touch-action: manipulation; }
   min-height: 18px;
 }
 .readout {
+  margin-left: auto;
+  white-space: nowrap;
   font-family: var(--font-num);
   font-size: 14px;
   font-weight: 700;
@@ -152,6 +160,9 @@ button { cursor: pointer; touch-action: manipulation; }
 .legend i.each { border-top: 2px solid var(--d2); }
 .legend i.now { border-top: 2px solid var(--accent); }
 .legend i.bed { width: 14px; height: 10px; border: 0; background: var(--night); border-left: 2px dashed var(--muted); }
+.legend i.fade, .legend i.drop { width: 14px; height: 10px; border: 0; border-radius: 2px; }
+.legend i.fade { background: var(--fade); box-shadow: inset 0 0 0 1px rgba(202, 138, 4, 0.35); }
+.legend i.drop { background: var(--drop); box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.3); }
 
 .section-head { display: flex; align-items: center; gap: 8px; min-height: 44px; }
 .section-head h2 { margin: 0; font-size: 18px; font-weight: 650; }
@@ -277,7 +288,7 @@ button { cursor: pointer; touch-action: manipulation; }
 
   <section class="card" aria-label="Chart">
     <div class="chart-head">
-      <span>Level, % of one 10 mg peak</span>
+      <span id="cap">Level, % of one 10 mg peak</span>
       <span class="readout" id="readout" aria-live="polite"></span>
     </div>
     <div class="chart" id="chart"></div>
@@ -286,6 +297,8 @@ button { cursor: pointer; touch-action: manipulation; }
       <span><i class="each"></i>Each dose</span>
       <span><i class="now"></i>Now</span>
       <span><i class="bed"></i>Sleep</span>
+      <span><i class="fade"></i>9% below last peak</span>
+      <span><i class="drop"></i>20% below</span>
     </div>
   </section>
 
@@ -329,6 +342,10 @@ button { cursor: pointer; touch-action: manipulation; }
   let PEAK1 = 0;
   for (let h = 0; h <= 12; h += 0.01) PEAK1 = Math.max(PEAK1, shape(h));
   const PCT_PER_MG = 100 / (10 * PEAK1); // 100 = peak of a single 10 mg dose
+
+  // Shading thresholds, measured from the most recent peak of the total curve
+  const FADE = 0.09;  // yellow: 9% or more below it
+  const DROP = 0.20;  // red: 20% or more below it
 
   const DAY = 1440, STEP = 5;
   const COLORS = ['--d1', '--d2', '--d3', '--d4', '--d5', '--d6'];
@@ -412,6 +429,20 @@ button { cursor: pointer; touch-action: manipulation; }
     return { total, each };
   }
 
+  // For each sample: how far below the most recent local peak the total is (0.12 = 12% below).
+  // null until the first peak. A new peak replaces the old one as the reference.
+  function offPeak(total) {
+    const out = new Array(total.length).fill(null);
+    let ref = null;
+    for (let i = 1; i < total.length; i++) {
+      const prev = total[i - 1], cur = total[i];
+      const next = i + 1 < total.length ? total[i + 1] : cur;
+      if (cur > prev && cur >= next && cur > 0.05) ref = cur;
+      if (ref) out[i] = Math.max(0, 1 - cur / ref);
+    }
+    return out;
+  }
+
   /* ---------- Chart ---------- */
   let geom = null;
 
@@ -427,19 +458,31 @@ button { cursor: pointer; touch-action: manipulation; }
     const yMax = Math.max(125, Math.ceil((maxT * 1.08) / step) * step);
     const x = m => pad.l + (m / DAY) * iw;
     const y = v => pad.t + ih - (v / yMax) * ih;
-    geom = { W, H, pad, iw, ih, x, y, yMax };
+    const off = offPeak(s.total);
+    geom = { W, H, pad, iw, ih, x, y, yMax, off };
 
     const path = vals => vals.map((v, i) => (i ? 'L' : 'M') + x(i * STEP).toFixed(1) + ' ' + y(v).toFixed(1)).join('');
     let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" id="svg">`;
     svg += `<defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" style="stop-color:var(--accent);stop-opacity:.30"/>
-      <stop offset="1" style="stop-color:var(--accent);stop-opacity:0"/></linearGradient></defs>`;
+      <stop offset="0" style="stop-color:var(--ink);stop-opacity:.13"/>
+      <stop offset="1" style="stop-color:var(--ink);stop-opacity:0"/></linearGradient></defs>`;
 
     // Sleep band: bedtime to wake
     const bedPos = posOf(state.bed), wakePos = posOf(state.wake);
     const band = (a, b) => (b > a ? `<rect x="${x(a).toFixed(1)}" y="${pad.t}" width="${(x(b) - x(a)).toFixed(1)}" height="${ih}" style="fill:var(--night)"/>` : '');
     if (bedPos > wakePos) svg += band(bedPos, DAY) + band(0, wakePos);
     else svg += band(bedPos, wakePos);
+
+    // Yellow / red shading by distance below the most recent peak
+    const kinds = off.map(o => (o === null ? null : o >= DROP ? 'drop' : o >= FADE ? 'fade' : null));
+    for (let i = 0; i < kinds.length;) {
+      if (!kinds[i]) { i++; continue; }
+      let j = i;
+      while (j + 1 < kinds.length && kinds[j + 1] === kinds[i]) j++;
+      const a = Math.max(0, (i - 0.5) * STEP), b = Math.min(DAY, (j + 0.5) * STEP);
+      svg += `<rect x="${x(a).toFixed(1)}" y="${pad.t}" width="${(x(b) - x(a)).toFixed(1)}" height="${ih}" style="fill:var(--${kinds[i]})"/>`;
+      i = j + 1;
+    }
 
     // Y grid
     for (let v = 0; v <= yMax; v += step) {
@@ -527,7 +570,11 @@ button { cursor: pointer; touch-action: manipulation; }
       $('#scrubLine').setAttribute('x2', sx);
       $('#scrubDot').setAttribute('cx', sx);
       $('#scrubDot').setAttribute('cy', geom.y(v).toFixed(1));
-      $('#readout').textContent = fmtClock(windowStart() + m) + ' · ' + Math.round(v) + '%';
+      const o = geom.off[Math.round(m / STEP)];
+      let txt = fmtClock(windowStart() + m) + ' · ' + Math.round(v) + '%';
+      if (o !== null && o !== undefined && Math.round(o * 100) >= 1) txt += ' · −' + Math.round(o * 100) + '% from peak';
+      $('#readout').textContent = txt;
+      $('#cap').style.display = 'none';
       clearTimeout(hideTimer);
     };
     const hide = () => {
@@ -536,6 +583,7 @@ button { cursor: pointer; touch-action: manipulation; }
         const g = $('#scrub');
         if (g) g.style.display = 'none';
         $('#readout').textContent = '';
+        $('#cap').style.display = '';
       }, 1800);
     };
     svg.addEventListener('pointerdown', ev => { show(ev); });
