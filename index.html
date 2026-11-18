@@ -24,8 +24,8 @@
   --line: #dfe2e6;
   --accent: #d4561a;
   --night: rgba(64, 86, 140, 0.10);
-  --fade: rgba(234, 179, 8, 0.17);
-  --drop: rgba(220, 38, 38, 0.11);
+  --fade: rgba(234, 179, 8, 0.26);
+  --drop: rgba(220, 38, 38, 0.16);
   --d1: #0e8f80;
   --d2: #3a68d0;
   --d3: #b8407f;
@@ -45,8 +45,8 @@
     --line: #2b3038;
     --accent: #ff8644;
     --night: rgba(130, 150, 225, 0.13);
-    --fade: rgba(250, 204, 21, 0.16);
-    --drop: rgba(248, 113, 113, 0.14);
+    --fade: rgba(250, 204, 21, 0.22);
+    --drop: rgba(248, 113, 113, 0.22);
     --d1: #2fc6b0;
     --d2: #7199ff;
     --d3: #f06dae;
@@ -64,8 +64,8 @@
   --line: #2b3038;
   --accent: #ff8644;
   --night: rgba(130, 150, 225, 0.13);
-  --fade: rgba(250, 204, 21, 0.16);
-  --drop: rgba(248, 113, 113, 0.14);
+  --fade: rgba(250, 204, 21, 0.22);
+  --drop: rgba(248, 113, 113, 0.22);
   --d1: #2fc6b0;
   --d2: #7199ff;
   --d3: #f06dae;
@@ -473,14 +473,15 @@ button { cursor: pointer; touch-action: manipulation; }
     if (bedPos > wakePos) svg += band(bedPos, DAY) + band(0, wakePos);
     else svg += band(bedPos, wakePos);
 
-    // Yellow / red shading by distance below the most recent peak
+    // Yellow / red shading by distance below the most recent peak (drawn later, clipped to under the curve)
     const kinds = off.map(o => (o === null ? null : o >= DROP ? 'drop' : o >= FADE ? 'fade' : null));
+    let bands = '';
     for (let i = 0; i < kinds.length;) {
       if (!kinds[i]) { i++; continue; }
       let j = i;
       while (j + 1 < kinds.length && kinds[j + 1] === kinds[i]) j++;
       const a = Math.max(0, (i - 0.5) * STEP), b = Math.min(DAY, (j + 0.5) * STEP);
-      svg += `<rect x="${x(a).toFixed(1)}" y="${pad.t}" width="${(x(b) - x(a)).toFixed(1)}" height="${ih}" style="fill:var(--${kinds[i]})"/>`;
+      bands += `<rect x="${x(a).toFixed(1)}" y="${pad.t}" width="${(x(b) - x(a)).toFixed(1)}" height="${ih}" style="fill:var(--${kinds[i]})"/>`;
       i = j + 1;
     }
 
@@ -500,7 +501,9 @@ button { cursor: pointer; touch-action: manipulation; }
     const hasAny = maxT > 0.05;
     if (hasAny) {
       // Area + per-dose lines + total
-      svg += `<path d="${path(s.total)}L${x(DAY).toFixed(1)} ${y(0).toFixed(1)}L${x(0).toFixed(1)} ${y(0).toFixed(1)}Z" style="fill:url(#fill)"/>`;
+      const area = `${path(s.total)}L${x(DAY).toFixed(1)} ${y(0).toFixed(1)}L${x(0).toFixed(1)} ${y(0).toFixed(1)}Z`;
+      svg += `<path d="${area}" style="fill:url(#fill)"/>`;
+      if (bands) svg += `<clipPath id="under"><path d="${area}"/></clipPath><g clip-path="url(#under)">${bands}</g>`;
       if (s.each.filter(e => e.mg).length > 1) {
         s.each.forEach(e => {
           if (!e.mg) return;

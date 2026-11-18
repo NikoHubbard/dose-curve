@@ -1,5 +1,5 @@
 // Offline cache for Dose Curve. Bump VERSION after changing any file so phones pick up the update.
-const VERSION = 'dose-curve-v2';
+const VERSION = 'dose-curve-v3';
 const FILES = [
   './',
   './index.html',
