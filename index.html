@@ -26,6 +26,8 @@
   --night: rgba(64, 86, 140, 0.10);
   --fade: rgba(234, 179, 8, 0.26);
   --drop: rgba(220, 38, 38, 0.16);
+  --green: #1f9d55;
+  --green-op: 0.24;
   --d1: #0e8f80;
   --d2: #3a68d0;
   --d3: #b8407f;
@@ -47,6 +49,8 @@
     --night: rgba(130, 150, 225, 0.13);
     --fade: rgba(250, 204, 21, 0.22);
     --drop: rgba(248, 113, 113, 0.22);
+    --green: #34d07a;
+    --green-op: 0.22;
     --d1: #2fc6b0;
     --d2: #7199ff;
     --d3: #f06dae;
@@ -66,6 +70,8 @@
   --night: rgba(130, 150, 225, 0.13);
   --fade: rgba(250, 204, 21, 0.22);
   --drop: rgba(248, 113, 113, 0.22);
+  --green: #34d07a;
+  --green-op: 0.22;
   --d1: #2fc6b0;
   --d2: #7199ff;
   --d3: #f06dae;
@@ -163,6 +169,7 @@ button { cursor: pointer; touch-action: manipulation; }
 .legend i.fade, .legend i.drop { width: 14px; height: 10px; border: 0; border-radius: 2px; }
 .legend i.fade { background: var(--fade); box-shadow: inset 0 0 0 1px rgba(202, 138, 4, 0.35); }
 .legend i.drop { background: var(--drop); box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.3); }
+.legend i.near { width: 14px; height: 10px; border: 0; border-radius: 2px; background: color-mix(in srgb, var(--green) 28%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 45%, transparent); }
 
 .section-head { display: flex; align-items: center; gap: 8px; min-height: 44px; }
 .section-head h2 { margin: 0; font-size: 18px; font-weight: 650; }
@@ -299,6 +306,7 @@ button { cursor: pointer; touch-action: manipulation; }
       <span><i class="bed"></i>Sleep</span>
       <span><i class="fade"></i>9% below last peak</span>
       <span><i class="drop"></i>20% below</span>
+      <span><i class="near"></i>Within 12% of a dose's own peak</span>
     </div>
   </section>
 
@@ -347,6 +355,7 @@ button { cursor: pointer; touch-action: manipulation; }
   // Shading thresholds, measured from the most recent peak of the total curve
   const FADE = 0.09;  // yellow: 9% or more below it
   const DROP = 0.20;  // red: 20% or more below it
+  const NEAR = 0.12;  // green: each dose within 12% of its own peak, rise and fall
 
   const DAY = 1440, STEP = 5;
   const COLORS = ['--d1', '--d2', '--d3', '--d4', '--d5', '--d6'];
@@ -506,17 +515,57 @@ button { cursor: pointer; touch-action: manipulation; }
     if (bedPos > wakePos) svg += band(bedPos, DAY) + band(0, wakePos);
     else svg += band(bedPos, wakePos);
 
-    // Yellow / red shading by distance below the most recent peak (drawn later, clipped to under the curve)
-    const kinds = off.map(o => (o === null ? null : o >= DROP ? 'drop' : o >= FADE ? 'fade' : null));
-    let bands = '';
-    for (let i = 0; i < kinds.length;) {
-      if (!kinds[i]) { i++; continue; }
+    /* Shading under the curves.
+       Yellow/red: under the total, by distance below the most recent peak.
+       Green: under each dose, while that dose is within NEAR of its own peak (mg × 10 on this scale).
+       Where green and yellow/red overlap in time, they cross-fade so the change is gradual. */
+    const n = s.total.length;
+    const warnKind = off.map(o => (o === null ? null : o >= DROP ? 'drop' : o >= FADE ? 'fade' : null));
+    const doseNear = s.each.map(e => (e.mg ? e.values.map(v => v >= (1 - NEAR) * e.mg * 10) : null));
+    const anyNear = new Array(n).fill(false);
+    doseNear.forEach(a => { if (a) a.forEach((on, i) => { if (on) anyNear[i] = true; }); });
+
+    const gW = anyNear.map(on => (on ? 1 : 0));   // green weight
+    const wW = warnKind.map(k => (k ? 1 : 0));    // yellow/red weight
+    const owner = k => (k < 0 || k >= n) ? 0.5
+      : anyNear[k] && !warnKind[k] ? 1
+      : warnKind[k] && !anyNear[k] ? 0 : 0.5;
+    for (let i = 0; i < n;) {
+      if (!(anyNear[i] && warnKind[i])) { i++; continue; }
       let j = i;
-      while (j + 1 < kinds.length && kinds[j + 1] === kinds[i]) j++;
-      const a = Math.max(0, (i - 0.5) * STEP), b = Math.min(DAY, (j + 0.5) * STEP);
-      bands += `<rect x="${x(a).toFixed(1)}" y="${pad.t}" width="${(x(b) - x(a)).toFixed(1)}" height="${ih}" style="fill:var(--${kinds[i]})"/>`;
+      while (j + 1 < n && anyNear[j + 1] && warnKind[j + 1]) j++;
+      const g0 = owner(i - 1), g1 = owner(j + 1);
+      for (let k = i; k <= j; k++) {
+        const t = (k - i + 0.5) / (j - i + 1);
+        gW[k] = g0 + (g1 - g0) * t;
+        wW[k] = 1 - gW[k];
+      }
       i = j + 1;
     }
+
+    // Horizontal gradient from per-sample color and opacity (each sample spans ±STEP/2)
+    const gradient = (id, colorAt, opAt, fallback) => {
+      let stops = '';
+      const keyAt = i => { const c = colorAt(i); return c ? [c, Math.round(opAt(i) * 1000) / 1000] : [fallback, 0]; };
+      for (let i = 0; i < n;) {
+        const [c, o] = keyAt(i);
+        let j = i;
+        while (j + 1 < n) { const [c2, o2] = keyAt(j + 1); if (c2 !== c || o2 !== o) break; j++; }
+        const a = (Math.max(0, (i - 0.5) * STEP) / DAY).toFixed(5);
+        const b = (Math.min(DAY, (j + 0.5) * STEP) / DAY).toFixed(5);
+        stops += `<stop offset="${a}" style="stop-color:${c};stop-opacity:${o}"/><stop offset="${b}" style="stop-color:${c};stop-opacity:${o}"/>`;
+        i = j + 1;
+      }
+      return `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${x(0).toFixed(1)}" y1="0" x2="${x(DAY).toFixed(1)}" y2="0">${stops}</linearGradient>`;
+    };
+
+    // Line along one dose's curve, starting at its dose time
+    const doseLine = e => {
+      const p = posOf(e.dose.time), i0 = Math.ceil(p / STEP);
+      let d = 'M' + x(p).toFixed(1) + ' ' + y(0).toFixed(1);
+      for (let i = i0; i < e.values.length; i++) d += 'L' + x(i * STEP).toFixed(1) + ' ' + y(e.values[i]).toFixed(1);
+      return d;
+    };
 
     // Y grid
     for (let v = 0; v <= yMax; v += step) {
@@ -536,15 +585,28 @@ button { cursor: pointer; touch-action: manipulation; }
       // Area + per-dose lines + total
       const area = `${path(s.total)}L${x(DAY).toFixed(1)} ${y(0).toFixed(1)}L${x(0).toFixed(1)} ${y(0).toFixed(1)}Z`;
       svg += `<path d="${area}" style="fill:url(#fill)"/>`;
-      if (bands) svg += `<clipPath id="under"><path d="${area}"/></clipPath><g clip-path="url(#under)">${bands}</g>`;
+
+      // Yellow / red under the total
+      if (warnKind.some(Boolean)) {
+        svg += `<defs>${gradient('warn', i => (warnKind[i] ? `var(--${warnKind[i]})` : null), i => wW[i], 'var(--fade)')}</defs>`;
+        svg += `<path d="${area}" style="fill:url(#warn)"/>`;
+      }
+
+      // Green under each dose near its own peak (group opacity keeps overlaps from stacking darker)
+      let greens = '', greenDefs = '';
+      s.each.forEach((e, k) => {
+        if (!doseNear[k] || !doseNear[k].some(Boolean)) return;
+        const id = 'near' + e.dose.id;
+        greenDefs += gradient(id, i => (doseNear[k][i] ? 'var(--green)' : null), i => gW[i], 'var(--green)');
+        greens += `<path d="${doseLine(e)}L${x(DAY).toFixed(1)} ${y(0).toFixed(1)}Z" style="fill:url(#${id})"/>`;
+      });
+      if (greens) svg += `<defs>${greenDefs}</defs><g style="opacity:var(--green-op)">${greens}</g>`;
+
       if (s.each.filter(e => e.mg).length > 1) {
         s.each.forEach(e => {
           if (!e.mg) return;
-          // Start each dose's line at its own dose time
-          const p = posOf(e.dose.time), i0 = Math.ceil(p / STEP);
-          let d = 'M' + x(p).toFixed(1) + ' ' + y(0).toFixed(1);
-          for (let i = i0; i < e.values.length; i++) d += 'L' + x(i * STEP).toFixed(1) + ' ' + y(e.values[i]).toFixed(1);
-          if (e.mg) svg += `<path d="${d}" style="fill:none;stroke:var(${e.dose.color});stroke-width:1.75;stroke-linejoin:round;opacity:.9"/>`;
+          const d = doseLine(e);
+          svg += `<path d="${d}" style="fill:none;stroke:var(${e.dose.color});stroke-width:1.75;stroke-linejoin:round;opacity:.9"/>`;
         });
       }
       svg += `<path d="${path(s.total)}" style="fill:none;stroke:var(--ink);stroke-width:3;stroke-linejoin:round;stroke-linecap:round"/>`;
